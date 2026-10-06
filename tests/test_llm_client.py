@@ -8,7 +8,7 @@ from core.config import Settings
 from core.errors import AllProvidersFailedError, PermanentProviderError, TransientProviderError
 from core.llm_client import LLMClient
 from core.pricing import cost_usd
-from core.providers import GeminiProvider
+from core.providers import GeminiProvider, GroqProvider
 from tests.conftest import FakeProvider, make_response, read_events
 
 MESSAGES = [{"role": "user", "content": "hola"}]
@@ -159,3 +159,24 @@ def test_provider_builds_response_with_usage_and_cost(monkeypatch):
     assert captured["json"]["temperature"] == 0.3
     assert (response.text, response.tokens_in, response.tokens_out) == ("Hola", 1_500, 400)
     assert response.cost_usd == pytest.approx(0.00145)
+
+
+def test_groq_provider_uses_openai_compatible_endpoint_and_api_key(monkeypatch):
+    captured = {}
+
+    def fake_post(url, json, headers, timeout):
+        captured.update(url=url, headers=headers)
+        body = {
+            "model": "openai/gpt-oss-20b",
+            "choices": [{"message": {"role": "assistant", "content": "Hola"}}],
+        }
+        return httpx.Response(200, json=body, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    provider = GroqProvider("openai/gpt-oss-20b", "llave-falsa")
+
+    response = provider.generate(MESSAGES)
+
+    assert captured["url"] == "https://api.groq.com/openai/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer llave-falsa"
+    assert response.provider == "groq"
